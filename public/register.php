@@ -39,9 +39,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($result->num_rows > 0) {
             $error_message = "Ez az email cím már foglalt.";
         } else {
+            // Barátkód generálása
+            $friend_code = uniqid(); // Egyedi barátkód generálása
+
             // SQL lekérdezés a felhasználó hozzáadására
-            $sql = "INSERT INTO users (username, email, birthdate, gender, password, gdpr_consent, role) 
-                    VALUES ('$username', '$email', '$birthdate', '$gender', '$hashed_password', '$gdpr_consent', '$role')";
+            $sql = "INSERT INTO users (username, email, birthdate, gender, password, gdpr_consent, role, friend_code) 
+                    VALUES ('$username', '$email', '$birthdate', '$gender', '$hashed_password', '$gdpr_consent', '$role', '$friend_code')";
 
             if ($conn->query($sql) === TRUE) {
                 $success_message = "Regisztráció sikeres!";
