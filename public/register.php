@@ -13,6 +13,16 @@ if ($conn->connect_error) {
     die("Kapcsolódási hiba: " . $conn->connect_error);
 }
 
+// Barátkód generáló függvény
+function generateFriendCode() {
+    $characters = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    $code = '';
+    for ($i = 0; $i < 8; $i++) {
+        $code .= $characters[rand(0, strlen($characters) - 1)];
+    }
+    return $code;
+}
+
 // Ellenőrizzük, hogy az űrlap adatokat küldtek-e
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // Az űrlapról kapott adatok
@@ -31,6 +41,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } else {
         // Jelszó hash-elése bcrypt-el
         $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+        
+        // Egyedi barátkód generálása
+        $friend_code = generateFriendCode();
 
         // Ellenőrizzük, hogy az email cím nem létezik-e már
         $check_email_sql = "SELECT * FROM users WHERE email = '$email'";
@@ -39,9 +52,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($result->num_rows > 0) {
             $error_message = "Ez az email cím már foglalt.";
         } else {
-            // Barátkód generálása
-            $friend_code = uniqid(); // Egyedi barátkód generálása
-
             // SQL lekérdezés a felhasználó hozzáadására
             $sql = "INSERT INTO users (username, email, birthdate, gender, password, gdpr_consent, role, friend_code) 
                     VALUES ('$username', '$email', '$birthdate', '$gender', '$hashed_password', '$gdpr_consent', '$role', '$friend_code')";
@@ -151,5 +161,5 @@ $conn->close();
 
     <!-- Bootstrap JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</head>
+</body>
 </html>

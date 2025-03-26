@@ -8,7 +8,16 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 // Adatbázis kapcsolat
-include '../../config/config.php'; // Frissítsd az elérési utat, ha szükséges
+$servername = "localhost";
+$username = "root";
+$password = "";
+$dbname = "voltizap";
+
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+if ($conn->connect_error) {
+    die("Kapcsolódási hiba: " . $conn->connect_error);
+}
 
 // Felhasználó adatainak lekérése
 $user_id = $_SESSION['user_id'];
@@ -16,28 +25,24 @@ $result = $conn->query("SELECT * FROM users WHERE id='$user_id'");
 
 if ($result->num_rows > 0) {
     $user = $result->fetch_assoc();
+    
+    // Ha nincs barátkód, generálunk egyet
+    if (empty($user['friend_code'])) {
+        require_once __DIR__ . '/../includes/functions.php';
+        $friend_code = generateFriendCode($conn);
+        $conn->query("UPDATE users SET friend_code = '$friend_code' WHERE id = '$user_id'");
+        $user['friend_code'] = $friend_code;
+    }
 } else {
     echo "Felhasználó nem található!";
     exit();
 }
 
-// Barátok listájának lekérése
-$friends_result = $conn->query("
-    SELECT u.id, u.username, u.profile_pic, u.email, u.gender 
-    FROM user_friends uf 
-    JOIN users u ON uf.friend_id = u.id 
-    WHERE uf.user_id='$user_id'
-");
-$friends = $friends_result->fetch_all(MYSQLI_ASSOC);
-
-// Függőben lévő barátfelkérések lekérése
-$pending_requests_result = $conn->query("
-    SELECT fr.id, u.username 
-    FROM friend_requests fr 
-    JOIN users u ON fr.sender_id = u.id 
-    WHERE fr.receiver_id='$user_id' AND fr.status='pending'
-");
-$pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
+// Üzenetek kezelése
+$error = isset($_SESSION['error']) ? $_SESSION['error'] : null;
+$success = isset($_SESSION['success']) ? $_SESSION['success'] : null;
+unset($_SESSION['error']);
+unset($_SESSION['success']);
 ?>
 
 <!DOCTYPE html>
@@ -50,7 +55,7 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         .profile-container {
-            max-width: 600px;
+            max-width: 800px;
             margin: 0 auto;
             padding: 2rem;
             border: 1px solid #ddd;
@@ -83,6 +88,27 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
         .btn-container a {
             margin: 0 0.5rem;
         }
+        .add-friend-container, .friends-list {
+            margin-top: 2rem;
+            padding: 1rem;
+            border: 1px solid #eee;
+            border-radius: 5px;
+        }
+        .error-message {
+            color: red;
+            margin-bottom: 1rem;
+        }
+        .success-message {
+            color: green;
+            margin-bottom: 1rem;
+        }
+        .friend-code {
+            font-family: monospace;
+            background-color: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
 
         /* Sötét mód stílusok */
         body.dark-mode {
@@ -94,6 +120,11 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
             color: white;
             border-color: #333;
         }
+        .dark-mode .add-friend-container,
+        .dark-mode .friends-list {
+            border-color: #333;
+            background-color: #2a2a2a;
+        }
         .dark-mode .btn-primary {
             background-color: #bb86fc;
             border-color: #bb86fc;
@@ -102,32 +133,10 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
             background-color: #ffa726;
             border-color: #ffa726;
         }
-
-        /* Felugró üzenet stílusok */
-        .alert-popup {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 15px;
-            border-radius: 5px;
-            color: white;
-            font-weight: bold;
-            z-index: 1000;
-            opacity: 0;
-            transition: opacity 0.5s ease-in-out;
-        }
-
-        .alert-popup.show {
-            opacity: 1;
-        }
-
-        .alert-popup.success {
-            background-color: green;
-        }
-
-        .alert-popup.error {
-            background-color: red;
+        .dark-mode .friend-code {
+            background-color: #2a2a2a;
+            border-color: #444;
+            color: #fff;
         }
     </style>
 </head>
@@ -135,13 +144,25 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
     <div class="profile-container">
         <h1>Profil</h1>
         
+        <?php if ($error): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+        
+        <?php if ($success): ?>
+            <div class="alert alert-success"><?php echo htmlspecialchars($success); ?></div>
+        <?php endif; ?>
+        
         <!-- Profilkép megjelenítése -->
-        <img src="uploads/<?php echo $user['profile_pic']; ?>" alt="Profilkép" class="profile-picture">
+        <img src="uploads/<?php echo htmlspecialchars($user['profile_pic']); ?>" alt="Profilkép" class="profile-picture">
 
         <!-- Felhasználó adatainak megjelenítése -->
         <div class="profile-info">
-            <p><strong>Felhasználónév:</strong> <?php echo $user['username']; ?></p>
-            <p><strong>E-mail:</strong> <?php echo $user['email']; ?></p>
+            <p><strong>Felhasználónév:</strong> <?php echo htmlspecialchars($user['username']); ?></p>
+            <p><strong>E-mail:</strong> <?php echo htmlspecialchars($user['email']); ?></p>
+            <p><strong>Barátkód:</strong> 
+                <span class="friend-code"><?php echo htmlspecialchars($user['friend_code']); ?></span>
+                <button class="btn btn-sm btn-outline-secondary ms-2" onclick="copyFriendCode()">Másolás</button>
+            </p>
             <p><strong>Neme:</strong> 
                 <?php
                 if ($user['gender'] == 'male') {
@@ -153,59 +174,7 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
                 }
                 ?>
             </p>
-            <!-- Pontszám megjelenítése -->
-            <p><strong>Pontszám:</strong> <?php echo $user['score']; ?></p>
-            <!-- Streak megjelenítése -->
-            <p><strong>Streak:</strong> <?php echo $user['streak']; ?> nap</p>
-            <!-- Barátkód megjelenítése -->
-            <p><strong>Barátkód:</strong> <?php echo $user['friend_code']; ?></p>
-        </div>
-
-        <!-- Barátok hozzáadása -->
-        <div class="profile-info">
-            <h2>Barátok</h2>
-            <form action="add_friend.php" method="POST">
-                <div class="mb-3">
-                    <label for="friendCode" class="form-label">Barátkód</label>
-                    <input type="text" class="form-control" id="friendCode" name="friendCode" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Barát hozzáadása</button>
-            </form>
-        </div>
-
-        <!-- Függőben lévő barátfelkérések megjelenítése -->
-        <div class="profile-info">
-            <h3>Függőben lévő barátfelkérések</h3>
-            <ul>
-                <?php foreach ($pending_requests as $request): ?> 
-                <li>
-                    <?php echo $request['username']; ?>
-                    <form action="accept_friend_request.php" method="POST" style="display:inline;">
-                        <input type="hidden" name="requestId" value="<?php echo $request['id']; ?>">
-                        <button type="submit" name="action" value="accept" class="btn btn-success btn-sm">Elfogad</button>
-                        <button type="submit" name="action" value="reject" class="btn btn-danger btn-sm">Elutasít</button>
-                    </form>
-                </li>
-            <?php endforeach; ?>
-
-            </ul>
-        </div>
-
-        <!-- Barátok listájának megjelenítése -->
-        <div class="profile-info">
-            <h3>Barátaid</h3>
-            <ul>
-                <?php foreach ($friends as $friend): ?>
-                    <li>
-                        <?php echo $friend['username']; ?>
-                        <button class="btn btn-info btn-sm" onclick="viewFriendProfile(<?php echo $friend['id']; ?>)">Profil megtekintése</button>
-                        <form action="remove_friend.php" method="POST" style="display:inline;">
-                            <input type="hidden" name="friendId" value="<?php echo $friend['id']; ?>">
-                            <button type="submit" class="btn btn-danger btn-sm">Törlés</button>
-                        </form>
-                    </li>
-                <?php endforeach; ?>
-            </ul>
+            <p><strong>Pontszám:</strong> <?php echo htmlspecialchars($user['score']); ?></p>
         </div>
 
         <!-- Gombok -->
@@ -214,34 +183,70 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
             <a href="edit_profile.php" class="btn btn-warning">Profil szerkesztése</a>
         </div>
 
-        <!-- Sötét mód váltó gomb -->
-        <div class="btn-container">
-            <button id="toggleDarkMode" class="btn btn-secondary">Sötét mód</button>
+        <!-- Barát hozzáadása form -->
+        <div class="add-friend-container mt-4">
+            <h3>Barát hozzáadása</h3>
+            <form action="/Learning-App-main/public/user/friends/send_request.php" method="post">
+                <div class="input-group mb-3">
+                    <input type="text" name="friend_code" class="form-control" placeholder="Barátkód" required>
+                    <button class="btn btn-success" type="submit">Hozzáad</button>
+                </div>
+            </form>
         </div>
-    </div>
 
-    <!-- Barát profiljának megtekintése modal -->
-    <div class="modal fade" id="friendProfileModal" tabindex="-1" aria-labelledby="friendProfileModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="friendProfileModalLabel">Barát profilja</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" id="friendProfileContent">
-                    <!-- A barát profiljának tartalma ide kerül -->
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Bezárás</button>
-                </div>
-            </div>
+        <!-- Barátok listája -->
+        <div class="friends-list mt-4">
+            <h3>Barátaid</h3>
+            <?php
+            // Frissített lekérdezés, ami ellenőrzi, hogy létezik-e a status oszlop
+            $check_status = $conn->query("SHOW COLUMNS FROM user_friends LIKE 'status'");
+            if ($check_status->num_rows > 0) {
+                // Ha van status oszlop
+                $friends_query = "SELECT u.id, u.username, u.profile_pic 
+                                FROM users u 
+                                JOIN user_friends uf ON u.id = uf.friend_id 
+                                WHERE uf.user_id = '$user_id' AND uf.status = 'accepted'";
+            } else {
+                // Ha nincs status oszlop
+                $friends_query = "SELECT u.id, u.username, u.profile_pic 
+                                FROM users u 
+                                JOIN user_friends uf ON u.id = uf.friend_id 
+                                WHERE uf.user_id = '$user_id'";
+            }
+            
+            $friends_result = $conn->query($friends_query);
+            
+            if ($friends_result->num_rows > 0) {
+                echo '<ul class="list-group">';
+                while ($friend = $friends_result->fetch_assoc()) {
+                    echo '<li class="list-group-item d-flex align-items-center">';
+                    echo '<img src="uploads/' . htmlspecialchars($friend['profile_pic']) . '" alt="Profilkép" class="rounded-circle me-3" width="40" height="40">';
+                    echo htmlspecialchars($friend['username']);
+                    echo '</li>';
+                }
+                echo '</ul>';
+            } else {
+                echo '<p>Még nincsenek barátaid.</p>';
+            }
+            ?>
+        </div>
+
+        <!-- Barátkérelmek linkje -->
+        <div class="friend-requests mt-4">
+        <a href="friends/friend_requests.php" class="btn btn-info">Barátkérelmek megtekintése</a>
+
+        </div>
+
+        <!-- Sötét mód váltó gomb -->
+        <div class="btn-container mt-3">
+            <button id="toggleDarkMode" class="btn btn-secondary">Sötét mód</button>
         </div>
     </div>
 
     <!-- Bootstrap JavaScript -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
-    <!-- Sötét mód és felugró üzenetek JavaScript -->
+    <!-- Sötét mód JavaScript -->
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             const body = document.getElementById("pageBody");
@@ -262,125 +267,28 @@ $pending_requests = $pending_requests_result->fetch_all(MYSQLI_ASSOC);
             });
         });
 
-        // Felugró üzenetek megjelenítése
-        function showAlert(message, type) {
-            const alertPopup = document.createElement('div');
-            alertPopup.className = `alert-popup ${type}`;
-            alertPopup.textContent = message;
-
-            document.body.appendChild(alertPopup);
-
-            // Megjelenítés
-            setTimeout(() => {
-                alertPopup.classList.add('show');
-            }, 100);
-
-            // Eltűntetés 3 másodperc után
-            setTimeout(() => {
-                alertPopup.classList.remove('show');
-                setTimeout(() => {
-                    document.body.removeChild(alertPopup);
-                }, 500); // Várakozás az animáció befejezésére
-            }, 3000);
-        }
-
-        // Barát hozzáadása form kezelése
-        document.querySelector('form[action="add_friend.php"]').addEventListener('submit', function (e) {
-            e.preventDefault();
-
-            const formData = new FormData(this);
-
-            fetch('add_friend.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    showAlert(data.message, 'success');
-                } else {
-                    showAlert(data.message, 'error');
-                }
-                // Frissítjük az oldalt, hogy a változások megjelenjenek
-                setTimeout(() => {
-                    window.location.reload();
-                }, 3000);
-            })
-            .catch(error => {
-                showAlert('Hiba történt a kérés feldolgozása során!', 'error');
-            });
-        });
-
-        // Barátfelkérések elfogadása vagy elutasítása
-        document.querySelectorAll('form[action="accept_friend_request.php"]').forEach(form => {
-    form.addEventListener('submit', function (e) {
-        e.preventDefault();
-
-        const formData = new FormData(this);
-        const requestId = formData.get('requestId');
-        const action = formData.get('action');
-
-        fetch('accept_friend_request.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestId, action })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                showAlert(data.message, 'success');
-            } else {
-                showAlert(data.message, 'error');
-            }
-            setTimeout(() => { window.location.reload(); }, 2000);
-        })
-        .catch(() => {
-            showAlert('Hiba történt a kérés feldolgozása során!', 'error');
-        });
-    });
-});
-
-
-
-        // Barátok törlése
-        document.querySelectorAll('form[action="remove_friend.php"]').forEach(form => {
-            form.addEventListener('submit', function (e) {
-                e.preventDefault();
-
-                const formData = new FormData(this);
-
-                fetch('remove_friend.php', {
-                    method: 'POST',
-                    body: formData
+        // Barátkód másolása funkció
+        function copyFriendCode() {
+            const friendCode = document.querySelector('.friend-code').textContent;
+            navigator.clipboard.writeText(friendCode)
+                .then(() => {
+                    alert('Barátkód másolva!');
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        showAlert(data.message, 'success');
-                    } else {
-                        showAlert(data.message, 'error');
-                    }
-                    // Frissítjük az oldalt, hogy a változások megjelenjenek
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 3000);
-                })
-                .catch(error => {
-                    showAlert('Hiba történt a kérés feldolgozása során!', 'error');
-                });
-            });
-        });
-
-        // Barát profiljának megtekintése
-        function viewFriendProfile(friendId) {
-            fetch(`get_friend_profile.php?friendId=${friendId}`)
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('friendProfileContent').innerHTML = data;
-                    const modal = new bootstrap.Modal(document.getElementById('friendProfileModal'));
-                    modal.show();
+                .catch(err => {
+                    console.error('Hiba a másolás során:', err);
+                    // Alternatív másolási módszer
+                    const textarea = document.createElement('textarea');
+                    textarea.value = friendCode;
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                    alert('Barátkód másolva!');
                 });
         }
     </script>
 </body>
 </html>
+<?php
+$conn->close();
+?>
